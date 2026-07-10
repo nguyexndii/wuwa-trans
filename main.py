@@ -4,6 +4,7 @@ import json
 import time
 import queue
 import threading
+import tempfile
 from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
@@ -24,6 +25,8 @@ class TranslationResult(BaseModel):
     inferred_speaker_gender: Optional[str] = Field(default="unknown", description="The inferred gender of the speaker based on their appearance, name, or dialogue. Allowed values: 'male', 'female', 'unknown'.")
     inferred_relationship: Optional[str] = Field(default="neutral", description="The inferred relationship or attitude of the speaker towards Rover based on the context. Allowed values: 'friendly', 'respectful', 'hostile', 'neutral'.")
     new_terms: Optional[Dict[str, str]] = Field(default={}, description="Any game-specific terms, locations, or items detected in this dialogue, mapped as {English_term: Vietnamese_translation_with_parentheses}. Example: {'Jinzhou': 'Kim Châu (Jinzhou)'}")
+    reasoning: Optional[str] = Field(default="", description="Analyze the tone, speaker relationship, gender context, and how to make the translation natural in Vietnamese before translating.")
+    draft_translation: Optional[str] = Field(default="", description="A draft translation of the dialogue in Vietnamese, translating the meaning directly before refining it.")
 
 class ScreenTranslatorApp:
     def __init__(self):
@@ -46,6 +49,21 @@ class ScreenTranslatorApp:
         self.glossary_file = "glossary.json"
         self.glossary = self.load_glossary()
 
+    def save_json_atomic(self, filepath, data):
+        dir_name = os.path.dirname(filepath) or "."
+        fd, temp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(temp_path, filepath)
+        except Exception as e:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+            print(f"Lỗi ghi file atomic {filepath}: {e}")
+
     def load_config(self):
         if os.path.exists("config.json"):
             try:
@@ -59,30 +77,55 @@ class ScreenTranslatorApp:
             "model_name": "gemini-2.5-flash",
             "rover_gender": "female",
             "history_limit": 10,
-            "overlay_duration_seconds": 8
+            "overlay_duration_seconds": 8,
+            "use_fixed_subtitle": True
         }
         self.save_config(default_config)
         return default_config
 
     def save_config(self, config):
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        self.save_json_atomic("config.json", config)
 
     def load_character_memory(self):
+        memory = {}
         if os.path.exists(self.character_memory_file):
             try:
                 with open(self.character_memory_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    memory = json.load(f)
             except Exception:
                 pass
-        return {}
+        
+        # Migration: Ensure all entries have use_count and last_used
+        changed = False
+        for name, info in memory.items():
+            if not isinstance(info, dict):
+                memory[name] = {
+                    "gender": "unknown",
+                    "relationship": "neutral",
+                    "use_count": 1,
+                    "last_used": time.time()
+                }
+                changed = True
+            else:
+                if "gender" not in info:
+                    info["gender"] = "unknown"
+                    changed = True
+                if "relationship" not in info:
+                    info["relationship"] = "neutral"
+                    changed = True
+                if "use_count" not in info:
+                    info["use_count"] = 1
+                    changed = True
+                if "last_used" not in info:
+                    info["last_used"] = time.time()
+                    changed = True
+                    
+        if changed:
+            self.save_json_atomic(self.character_memory_file, memory)
+        return memory
 
     def save_character_memory(self):
-        try:
-            with open(self.character_memory_file, "w", encoding="utf-8") as f:
-                json.dump(self.character_memory, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Lỗi lưu bộ nhớ nhân vật: {e}")
+        self.save_json_atomic(self.character_memory_file, self.character_memory)
 
     def update_character_memory(self, speaker, gender, relationship):
         if not speaker or speaker.lower() in ["unknown", "nhân vật", "lỗi", ""] or speaker.strip() == "":
@@ -98,20 +141,27 @@ class ScreenTranslatorApp:
         if speaker not in self.character_memory:
             self.character_memory[speaker] = {
                 "gender": gender,
-                "relationship": relationship
+                "relationship": relationship,
+                "use_count": 1,
+                "last_used": time.time()
             }
             changed = True
             print(f"\n[Bộ nhớ nhân vật] Đã học nhân vật mới: {speaker} (Giới tính: {gender}, Quan hệ: {relationship})")
         else:
-            # If character exists but has 'unknown' gender and we now have a real gender
+            # If character exists, increment use count and update timestamp
             existing = self.character_memory[speaker]
+            existing["use_count"] = existing.get("use_count", 0) + 1
+            existing["last_used"] = time.time()
+            changed = True
+            
+            # Update gender if previously unknown
             if existing.get("gender") == "unknown" and gender != "unknown":
                 existing["gender"] = gender
-                changed = True
                 print(f"\n[Bộ nhớ nhân vật] Cập nhật giới tính cho {speaker}: {gender}")
+                
+            # Update relationship if previously neutral
             if existing.get("relationship") == "neutral" and relationship != "neutral":
                 existing["relationship"] = relationship
-                changed = True
                 print(f"\n[Bộ nhớ nhân vật] Cập nhật quan hệ cho {speaker}: {relationship}")
                 
         if changed:
@@ -121,39 +171,58 @@ class ScreenTranslatorApp:
 
     def load_glossary(self):
         default_glossary = {
-            "Resonator": "Người Cộng Hưởng (Resonator)",
-            "Tacet Discord": "Dị Vật Tacet (Tacet Discord)",
-            "Jinzhou": "Kim Châu (Jinzhou)",
-            "Huanglong": "Hoàng Long (Huanglong)",
-            "Forte": "Kỹ Năng Forte (Forte)",
-            "Echo": "Dư Âm (Echo)"
+            "Resonator": {"translation": "Người Cộng Hưởng (Resonator)", "use_count": 10, "last_used": time.time()},
+            "Tacet Discord": {"translation": "Dị Vật Tacet (Tacet Discord)", "use_count": 10, "last_used": time.time()},
+            "Jinzhou": {"translation": "Kim Châu (Jinzhou)", "use_count": 10, "last_used": time.time()},
+            "Huanglong": {"translation": "Hoàng Long (Huanglong)", "use_count": 10, "last_used": time.time()},
+            "Forte": {"translation": "Kỹ Năng Forte (Forte)", "use_count": 10, "last_used": time.time()},
+            "Echo": {"translation": "Dư Âm (Echo)", "use_count": 10, "last_used": time.time()}
         }
+        
+        glossary = {}
         if os.path.exists(self.glossary_file):
             try:
                 with open(self.glossary_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    # Merge default keys if they don't exist
-                    for k, v in default_glossary.items():
-                        if k not in data:
-                            data[k] = v
-                    return data
+                    glossary = json.load(f)
             except Exception:
                 pass
         
-        # Save defaults if no file exists
-        try:
-            with open(self.glossary_file, "w", encoding="utf-8") as f:
-                json.dump(default_glossary, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
-        return default_glossary
+        # Migration: convert old string values to dict containing count & time
+        changed = False
+        for k, v in list(glossary.items()):
+            if isinstance(v, str):
+                glossary[k] = {
+                    "translation": v,
+                    "use_count": 1,
+                    "last_used": time.time()
+                }
+                changed = True
+            elif isinstance(v, dict):
+                if "translation" not in v:
+                    v["translation"] = k
+                    changed = True
+                if "use_count" not in v:
+                    v["use_count"] = 1
+                    changed = True
+                if "last_used" not in v:
+                    v["last_used"] = time.time()
+                    changed = True
+            else:
+                glossary[k] = {"translation": str(v), "use_count": 1, "last_used": time.time()}
+                changed = True
+                
+        # Merge default terms if not present
+        for k, v in default_glossary.items():
+            if k not in glossary:
+                glossary[k] = v
+                changed = True
+                
+        if changed:
+            self.save_json_atomic(self.glossary_file, glossary)
+        return glossary
 
     def save_glossary(self):
-        try:
-            with open(self.glossary_file, "w", encoding="utf-8") as f:
-                json.dump(self.glossary, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Lỗi lưu từ điển thuật ngữ: {e}")
+        self.save_json_atomic(self.glossary_file, self.glossary)
 
     def update_glossary(self, new_terms):
         if not new_terms:
@@ -163,13 +232,47 @@ class ScreenTranslatorApp:
             eng_clean = eng.strip()
             vi_clean = vi.strip()
             if eng_clean and vi_clean and eng_clean not in self.glossary:
-                self.glossary[eng_clean] = vi_clean
+                self.glossary[eng_clean] = {
+                    "translation": vi_clean,
+                    "use_count": 1,
+                    "last_used": time.time()
+                }
                 changed = True
                 print(f"\n[Từ điển thuật ngữ] Đã học thuật ngữ mới: {eng_clean} -> {vi_clean}")
         if changed:
             self.save_glossary()
             return True
         return False
+
+    def get_filtered_character_memory(self, limit=10):
+        current_time = time.time()
+        scored_characters = []
+        for name, info in self.character_memory.items():
+            use_count = info.get("use_count", 1)
+            last_used = info.get("last_used", current_time)
+            seconds_since_last_used = max(0.0, current_time - last_used)
+            # Công thức tính điểm: Score = use_count + 10 / (seconds_since_last_used + 1.0)
+            score = use_count + (10.0 / (seconds_since_last_used + 1.0))
+            scored_characters.append((name, info, score))
+            
+        # Sắp xếp giảm dần theo điểm số
+        scored_characters.sort(key=lambda x: x[2], reverse=True)
+        return scored_characters[:limit]
+
+    def get_filtered_glossary(self, limit=40):
+        current_time = time.time()
+        scored_terms = []
+        for eng, info in self.glossary.items():
+            use_count = info.get("use_count", 1)
+            last_used = info.get("last_used", current_time)
+            seconds_since_last_used = max(0.0, current_time - last_used)
+            # Công thức tính điểm: Score = use_count + 10 / (seconds_since_last_used + 1.0)
+            score = use_count + (10.0 / (seconds_since_last_used + 1.0))
+            scored_terms.append((eng, info, score))
+            
+        # Sắp xếp giảm dần theo điểm số
+        scored_terms.sort(key=lambda x: x[2], reverse=True)
+        return scored_terms[:limit]
 
     def get_api_keys(self):
         # Check environment variable first
@@ -203,6 +306,17 @@ class ScreenTranslatorApp:
         speaker_str = speaker if speaker else "Unknown"
         log_entry = f"[{timestamp}] {speaker_str}: {original}\n -> {speaker_str}: {translated}\n"
         
+        # Log rotation: check size limit (1MB)
+        if os.path.exists(self.log_file):
+            try:
+                if os.path.getsize(self.log_file) > 1 * 1024 * 1024:
+                    bak_file = self.log_file + ".bak"
+                    if os.path.exists(bak_file):
+                        os.remove(bak_file)
+                    os.rename(self.log_file, bak_file)
+            except Exception as e:
+                print(f"Lỗi xoay vòng log file: {e}")
+                
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(log_entry + "\n")
@@ -246,16 +360,18 @@ Lịch sử hội thoại gần đây để tham khảo ngữ cảnh:
         rover_gender = self.config.get("rover_gender", "female")
         gender_desc = "NỮ (Rover Nữ). Bạn và các NPC nói chuyện với Rover cần dùng các xưng hô nữ tính như 'cô', 'em', 'nàng', 'cậu', 'ta' phù hợp với quan hệ/tính cách nhân vật." if rover_gender == "female" else "NAM (Rover Nam). Dùng các xưng hô nam tính như 'anh', 'cậu', 'ta'."
         
-        # Build character profiles from memory
+        # Build character profiles from filtered memory (top 10 by score)
+        filtered_characters = self.get_filtered_character_memory(limit=10)
         memory_lines = []
-        for name, info in self.character_memory.items():
+        for name, info, _ in filtered_characters:
             memory_lines.append(f"- {name}: Giới tính {info.get('gender', 'unknown')}, mối quan hệ với Rover là {info.get('relationship', 'neutral')}")
         character_profiles = "\n".join(memory_lines) if memory_lines else "Chưa lưu thông tin nhân vật nào."
         
-        # Build glossary terms
+        # Build glossary terms from filtered glossary (top 40 by score)
+        filtered_glossary = self.get_filtered_glossary(limit=40)
         glossary_lines = []
-        for eng, vi in self.glossary.items():
-            glossary_lines.append(f"- {eng}: {vi}")
+        for eng, info, _ in filtered_glossary:
+            glossary_lines.append(f"- {eng}: {info.get('translation', eng)}")
         glossary_str = "\n".join(glossary_lines) if glossary_lines else "Chưa lưu thuật ngữ nào."
         
         # Quy tắc xưng hô chi tiết dựa trên Rover Nữ
@@ -304,48 +420,55 @@ Nhiệm vụ của bạn là:
         sys_inst = self.get_system_instruction()
         model_name = self.config.get("model_name", "gemini-2.5-flash")
         
-        attempts = len(self.api_keys)
+        max_retries = 3
         last_error = None
         
-        for _ in range(attempts):
-            api_key = self.api_keys[self.current_key_idx]
-            try:
-                # Initialize client dynamically using current key
-                client = genai.Client(api_key=api_key)
+        for retry_count in range(max_retries + 1):
+            if retry_count > 0:
+                sleep_time = 2 * retry_count
+                print(f"\n[Thử lại API] Tất cả các Key đều bị lỗi/giới hạn. Đang chờ {sleep_time} giây trước khi thử lại lần {retry_count}/{max_retries}...")
+                time.sleep(sleep_time)
                 
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[img, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=TranslationResult,
-                        system_instruction=sys_inst,
-                        temperature=0.2
-                    )
-                )
-                
-                result_json = json.loads(response.text)
-                
-                # If coordinates are [0,0,0,0] but we have translated text, and it's auto mode,
-                # we place it near the bottom of the screen (default dialogue position).
-                if is_auto and sum(result_json.get("box_2d", [0,0,0,0])) == 0 and result_json.get("translated_text"):
-                    # Default dialogue box coordinates for 16:9 bottom center
-                    result_json["box_2d"] = [700, 200, 920, 800]
+            attempts = len(self.api_keys)
+            for _ in range(attempts):
+                api_key = self.api_keys[self.current_key_idx]
+                try:
+                    # Initialize client dynamically using current key
+                    client = genai.Client(api_key=api_key)
                     
-                return result_json
-                
-            except Exception as e:
-                last_error = e
-                print(f"\n[Xoay API Key] Lỗi với Key index {self.current_key_idx}: {e}")
-                # Rotate to next key
-                self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
-                print(f"[Xoay API Key] Chuyển sang dùng Key index {self.current_key_idx}...")
-                
-        # If all keys failed
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[img, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=TranslationResult,
+                            system_instruction=sys_inst,
+                            temperature=0.2
+                        )
+                    )
+                    
+                    result_json = json.loads(response.text)
+                    
+                    # If coordinates are [0,0,0,0] but we have translated text, and it's auto mode,
+                    # we place it near the bottom of the screen (default dialogue position).
+                    if is_auto and sum(result_json.get("box_2d", [0,0,0,0])) == 0 and result_json.get("translated_text"):
+                        # Default dialogue box coordinates for 16:9 bottom center
+                        result_json["box_2d"] = [700, 200, 920, 800]
+                        
+                    return result_json
+                    
+                except Exception as e:
+                    last_error = e
+                    print(f"\n[Xoay API Key] Lỗi với Key index {self.current_key_idx}: {e}")
+                    # Rotate to next key
+                    self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
+                    print(f"[Xoay API Key] Chuyển sang dùng Key index {self.current_key_idx}...")
+                    
+        # If all keys and retries failed
         return {
             "speaker": "Lỗi",
             "original_text": "",
-            "translated_text": f"Tất cả API Key đều thất bại. Lỗi cuối cùng: {str(last_error)}",
+            "translated_text": f"Tất cả API Key đều thất bại sau {max_retries} lần thử lại. Lỗi cuối cùng: {str(last_error)}",
             "box_2d": [750, 250, 900, 750]
         }
 
