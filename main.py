@@ -29,6 +29,10 @@ BOLD = "\033[1m"
 if os.name == 'nt':
     os.system('')
 
+class TermPair(BaseModel):
+    english_term: str = Field(description="The original English term, e.g., 'Jinzhou'.")
+    vietnamese_translation: str = Field(description="The Sino-Vietnamese translation with English in parentheses, e.g., 'Kim Châu (Jinzhou)'.")
+
 # Define the Pydantic schema for Gemini structured output
 class TranslationResult(BaseModel):
     speaker: Optional[str] = Field(default="", description="Name of the character speaking in English, or empty string if no speaker is named.")
@@ -39,7 +43,7 @@ class TranslationResult(BaseModel):
     box_2d: List[int] = Field(default=[0, 0, 0, 0], description="Bounding box of the dialogue/text box containing 4 integers [ymin, xmin, ymax, xmax] on a 0-1000 scale.")
     inferred_speaker_gender: Optional[str] = Field(default="unknown", description="The inferred gender of the speaker based on their appearance, name, or dialogue. Allowed values: 'male', 'female', 'unknown'.")
     inferred_relationship: Optional[str] = Field(default="neutral", description="The inferred relationship or attitude of the speaker towards Rover based on the context. Allowed values: 'friendly', 'respectful', 'hostile', 'neutral'.")
-    new_terms: Optional[Dict[str, str]] = Field(default={}, description="Any game-specific terms, locations, or items detected in this dialogue, mapped as {English_term: Vietnamese_translation_with_parentheses}. Example: {'Jinzhou': 'Kim Châu (Jinzhou)'}")
+    new_terms: Optional[List[TermPair]] = Field(default=[], description="Any game-specific terms, locations, or items detected in this dialogue, mapped as a list of TermPair.")
 
 class ScreenTranslatorApp:
     def __init__(self):
@@ -348,7 +352,7 @@ class ScreenTranslatorApp:
             self.history.pop(0)
 
     def capture_screen(self):
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             # Capture the primary monitor
             monitor = sct.monitors[1]
             sct_img = sct.grab(monitor)
@@ -517,9 +521,20 @@ Nhiệm vụ của bạn là:
             self.update_character_memory(speaker, inferred_gender, inferred_rel)
             
         # Update glossary if new terms are detected
-        new_terms = result.get("new_terms", {})
+        new_terms = result.get("new_terms", [])
         if new_terms:
-            self.update_glossary(new_terms)
+            new_terms_dict = {}
+            for item in new_terms:
+                if isinstance(item, dict):
+                    eng = item.get("english_term", "")
+                    vi = item.get("vietnamese_translation", "")
+                else:
+                    eng = getattr(item, "english_term", "")
+                    vi = getattr(item, "vietnamese_translation", "")
+                if eng and vi:
+                    new_terms_dict[eng] = vi
+            if new_terms_dict:
+                self.update_glossary(new_terms_dict)
             
         speaker_prefix = f"{speaker}: " if speaker else ""
         print(f"\n{BOLD}{GOLD}[Gốc]{RESET} {speaker_prefix}{original}")
