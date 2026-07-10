@@ -20,13 +20,13 @@ from typing import List, Optional, Dict
 class TranslationResult(BaseModel):
     speaker: Optional[str] = Field(default="", description="Name of the character speaking in English, or empty string if no speaker is named.")
     original_text: str = Field(default="", description="The original English text detected in the dialogue box.")
+    reasoning: Optional[str] = Field(default="", description="Analyze the tone, speaker relationship, gender context, and how to make the translation natural in Vietnamese before translating.")
+    draft_translation: Optional[str] = Field(default="", description="A draft translation of the dialogue in Vietnamese, translating the meaning directly before refining it.")
     translated_text: str = Field(default="", description="The Vietnamese translation of the dialogue text, formatted naturally according to the context.")
     box_2d: List[int] = Field(default=[0, 0, 0, 0], description="Bounding box of the dialogue/text box containing 4 integers [ymin, xmin, ymax, xmax] on a 0-1000 scale.")
     inferred_speaker_gender: Optional[str] = Field(default="unknown", description="The inferred gender of the speaker based on their appearance, name, or dialogue. Allowed values: 'male', 'female', 'unknown'.")
     inferred_relationship: Optional[str] = Field(default="neutral", description="The inferred relationship or attitude of the speaker towards Rover based on the context. Allowed values: 'friendly', 'respectful', 'hostile', 'neutral'.")
     new_terms: Optional[Dict[str, str]] = Field(default={}, description="Any game-specific terms, locations, or items detected in this dialogue, mapped as {English_term: Vietnamese_translation_with_parentheses}. Example: {'Jinzhou': 'Kim Châu (Jinzhou)'}")
-    reasoning: Optional[str] = Field(default="", description="Analyze the tone, speaker relationship, gender context, and how to make the translation natural in Vietnamese before translating.")
-    draft_translation: Optional[str] = Field(default="", description="A draft translation of the dialogue in Vietnamese, translating the meaning directly before refining it.")
 
 class ScreenTranslatorApp:
     def __init__(self):
@@ -251,8 +251,9 @@ class ScreenTranslatorApp:
             use_count = info.get("use_count", 1)
             last_used = info.get("last_used", current_time)
             seconds_since_last_used = max(0.0, current_time - last_used)
-            # Công thức tính điểm: Score = use_count + 10 / (seconds_since_last_used + 1.0)
-            score = use_count + (10.0 / (seconds_since_last_used + 1.0))
+            minutes_since_last_used = seconds_since_last_used / 60.0
+            # Công thức tính điểm: Score = use_count + 10 / (minutes_since_last_used + 1.0)
+            score = use_count + (10.0 / (minutes_since_last_used + 1.0))
             scored_characters.append((name, info, score))
             
         # Sắp xếp giảm dần theo điểm số
@@ -266,8 +267,9 @@ class ScreenTranslatorApp:
             use_count = info.get("use_count", 1)
             last_used = info.get("last_used", current_time)
             seconds_since_last_used = max(0.0, current_time - last_used)
-            # Công thức tính điểm: Score = use_count + 10 / (seconds_since_last_used + 1.0)
-            score = use_count + (10.0 / (seconds_since_last_used + 1.0))
+            minutes_since_last_used = seconds_since_last_used / 60.0
+            # Công thức tính điểm: Score = use_count + 10 / (minutes_since_last_used + 1.0)
+            score = use_count + (10.0 / (minutes_since_last_used + 1.0))
             scored_terms.append((eng, info, score))
             
         # Sắp xếp giảm dần theo điểm số
@@ -425,7 +427,7 @@ Nhiệm vụ của bạn là:
         
         for retry_count in range(max_retries + 1):
             if retry_count > 0:
-                sleep_time = 2 * retry_count
+                sleep_time = 2 ** retry_count
                 print(f"\n[Thử lại API] Tất cả các Key đều bị lỗi/giới hạn. Đang chờ {sleep_time} giây trước khi thử lại lần {retry_count}/{max_retries}...")
                 time.sleep(sleep_time)
                 
