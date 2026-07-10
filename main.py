@@ -5,6 +5,7 @@ import time
 import queue
 import threading
 import tempfile
+import textwrap
 from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
@@ -342,6 +343,31 @@ class ScreenTranslatorApp:
         except Exception as e:
             print(f"Lỗi ghi log file: {e}")
 
+    def print_log(self, label, content, label_color, content_color):
+        if not content or not content.strip():
+            return
+            
+        try:
+            term_width = os.get_terminal_size().columns - 2
+            if term_width < 40:
+                term_width = 40
+        except Exception:
+            term_width = 78
+            
+        indent_size = len(label) + 1
+        indent = " " * indent_size
+        
+        wrapped_lines = textwrap.wrap(content, width=term_width,
+                                      initial_indent=f"{label} ",
+                                      subsequent_indent=indent)
+        for i, line in enumerate(wrapped_lines):
+            if i == 0:
+                lbl = line[:len(label)]
+                rest = line[len(label):]
+                print(f"{BOLD}{label_color}{lbl}{RESET}{content_color}{rest}{RESET}")
+            else:
+                print(f"{content_color}{line}{RESET}")
+
     def update_history(self, speaker, translated):
         self.history.append({
             "speaker": speaker if speaker else "Nhân vật",
@@ -513,7 +539,7 @@ Nhiệm vụ của bạn là:
         inferred_rel = result.get("inferred_relationship", "neutral")
         
         if not translated.strip():
-            print("Không tìm thấy hội thoại cần dịch.")
+            print(f"{BOLD}{RED}Không tìm thấy hội thoại cần dịch.{RESET}")
             return
             
         # Update character memory if speaker is detected
@@ -537,8 +563,9 @@ Nhiệm vụ của bạn là:
                 self.update_glossary(new_terms_dict)
             
         speaker_prefix = f"{speaker}: " if speaker else ""
-        print(f"\n{BOLD}{GOLD}[Gốc]{RESET} {speaker_prefix}{original}")
-        print(f"{BOLD}{GREEN}[Dịch]{RESET} {speaker_prefix}{translated}")
+        print()  # Dòng trống ngăn cách
+        self.print_log("[Gốc]", f"{speaker_prefix}{original}", GOLD, RESET)
+        self.print_log("[Dịch]", f"{speaker_prefix}{translated}", GREEN, GREEN)
         
         # Log to file
         self.log_translation(speaker, original, translated)
