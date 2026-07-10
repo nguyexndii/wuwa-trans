@@ -614,7 +614,7 @@ Nhiệm vụ của bạn là:
         print(f" {BOLD}{CYAN}ỨNG DỤNG DỊCH MÀN HÌNH WUTHERING WAVES ĐÃ SẴN SÀNG{RESET}")
         print(f" - Nhấn {BOLD}{GOLD}[Alt + Q]{RESET} bất cứ lúc nào trong game để dịch hội thoại.")
         print(f" - Gõ {BOLD}{GOLD}[?]{RESET} vào terminal này rồi Enter để vẽ vùng dịch thủ công.")
-        print(f" - Gõ {BOLD}{RED}[exit]{RESET} hoặc {BOLD}{RED}[q]{RESET} để thoát ứng dụng.")
+        print(f" - Gõ {BOLD}{RED}[exit]{RESET} để thoát ứng dụng.")
         print(f"{GOLD}" + "="*50 + f"{RESET}\n")
         
         # Register global hotkey
@@ -629,7 +629,7 @@ Nhiệm vụ của bạn là:
                 cmd = input("wuwa-trans> ").strip()
                 if cmd == '?':
                     self.trigger_manual_crop()
-                elif cmd.lower() in ['exit', 'q']:
+                elif cmd.lower() == 'exit':
                     self.gui_queue.put(('exit', None))
                     break
                 elif cmd.lower() == 'clear':
@@ -660,13 +660,13 @@ class TranslationOverlay(tk.Toplevel):
         
         # Position logic
         if is_auto and use_fixed:
-            # Fixed subtitle at bottom center
+            # Fixed subtitle at top center of screen
             width = int(screen_w * 0.6)  # 60% of screen width
             if width < 600:
                 width = 600
-            height = 145
+            height = 110  # Shorter height for top placement
             x = (screen_w - width) // 2
-            y = screen_h - height - 85   # offset by 85px to stay clear of taskbar/game UI
+            y = 50   # 50px offset from the top edge
         else:
             # Custom coordinates (crop mode or floating mode)
             width = x2 - x1
@@ -815,12 +815,12 @@ class TranslatingIndicator(tk.Toplevel):
         self.attributes("-alpha", 0.9)
         self.configure(bg="#222222")
         
-        # Center bottom of screen
+        # Center top of screen (just above subtitle area)
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         w, h = 180, 40
         x = (screen_w - w) // 2
-        y = screen_h - 100
+        y = 10
         self.geometry(f"{w}x{h}+{x}+{y}")
         
         lbl = tk.Label(self, text=text, font=("Segoe UI", 11, "bold"), fg="#FFD700", bg="#222222")
