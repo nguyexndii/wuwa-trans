@@ -16,6 +16,19 @@ from google.genai import types
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
+# ANSI Colors for terminal output
+GOLD = "\033[93m"
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+BLUE = "\033[94m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+
+# Initialize Windows console for ANSI escape codes
+if os.name == 'nt':
+    os.system('')
+
 # Define the Pydantic schema for Gemini structured output
 class TranslationResult(BaseModel):
     speaker: Optional[str] = Field(default="", description="Name of the character speaking in English, or empty string if no speaker is named.")
@@ -508,8 +521,9 @@ Nhiệm vụ của bạn là:
         if new_terms:
             self.update_glossary(new_terms)
             
-        print(f"\n[Gốc] {speaker + ': ' if speaker else ''}{original}")
-        print(f"[Dịch] {speaker + ': ' if speaker else ''}{translated}")
+        speaker_prefix = f"{speaker}: " if speaker else ""
+        print(f"\n{BOLD}{GOLD}[Gốc]{RESET} {speaker_prefix}{original}")
+        print(f"{BOLD}{GREEN}[Dịch]{RESET} {speaker_prefix}{translated}")
         
         # Log to file
         self.log_translation(speaker, original, translated)
@@ -534,7 +548,7 @@ Nhiệm vụ của bạn là:
         self.gui_queue.put(('show_overlay', (x1, y1, x2, y2, speaker, translated, is_auto)))
 
     def trigger_auto_translation(self):
-        print("\n[Alt+Q] Đang chụp màn hình...")
+        print(f"\n{BOLD}{CYAN}[Alt+Q] Đang chụp màn hình...{RESET}")
         try:
             img, width, height = self.capture_screen()
             # Start background thread for API call to keep GUI responsive
@@ -542,10 +556,10 @@ Nhiệm vụ của bạn là:
             t.daemon = True
             t.start()
         except Exception as e:
-            print(f"Lỗi chụp màn hình: {e}")
+            print(f"{BOLD}{RED}Lỗi chụp màn hình:{RESET} {e}")
 
     def trigger_manual_crop(self):
-        print("\n[?] Hãy chọn vùng cần dịch trên màn hình...")
+        print(f"\n{BOLD}{CYAN}[?] Hãy chọn vùng cần dịch trên màn hình...{RESET}")
         # Capture screen first
         try:
             img, width, height = self.capture_screen()
@@ -554,19 +568,19 @@ Nhiệm vụ của bạn là:
             print(f"Lỗi chụp màn hình: {e}")
 
     def run_cli_loop(self):
-        print("\n" + "="*50)
-        print(" ỨNG DỤNG DỊCH MÀN HÌNH WUTHERING WAVES ĐÃ SẴN SÀNG")
-        print(" - Nhấn [Alt + Q] bất cứ lúc nào trong game để dịch hội thoại.")
-        print(" - Gõ [?] vào terminal này rồi Enter để vẽ vùng dịch thủ công.")
-        print(" - Gõ [exit] hoặc [q] để thoát ứng dụng.")
-        print("="*50 + "\n")
+        print(f"\n{GOLD}" + "="*50)
+        print(f" {BOLD}{CYAN}ỨNG DỤNG DỊCH MÀN HÌNH WUTHERING WAVES ĐÃ SẴN SÀNG{RESET}")
+        print(f" - Nhấn {BOLD}{GOLD}[Alt + Q]{RESET} bất cứ lúc nào trong game để dịch hội thoại.")
+        print(f" - Gõ {BOLD}{GOLD}[?]{RESET} vào terminal này rồi Enter để vẽ vùng dịch thủ công.")
+        print(f" - Gõ {BOLD}{RED}[exit]{RESET} hoặc {BOLD}{RED}[q]{RESET} để thoát ứng dụng.")
+        print(f"{GOLD}" + "="*50 + f"{RESET}\n")
         
         # Register global hotkey
         try:
             keyboard.add_hotkey('alt+q', self.trigger_auto_translation)
         except Exception as e:
-            print(f"Cảnh báo: Không thể đăng ký phím tắt toàn hệ thống Alt+Q: {e}")
-            print("Gợi ý: Hãy thử chạy Terminal dưới quyền Administrator.")
+            print(f"{BOLD}{RED}Cảnh báo: Không thể đăng ký phím tắt toàn hệ thống Alt+Q:{RESET} {e}")
+            print(f"{BOLD}{GOLD}Gợi ý: Hãy thử chạy Terminal dưới quyền Administrator (Run as Administrator).{RESET}")
             
         while True:
             try:

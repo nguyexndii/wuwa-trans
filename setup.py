@@ -22,6 +22,16 @@ def main():
         
     # 2. Tao file Run_Translator.bat
     bat_content = """@echo off
+:: Check for Administrator privileges
+net session >nul 2>&1
+if %errorLevel% == 0 (
+    goto :admin
+) else (
+    echo Yeu cau quyen Administrator...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+:admin
 cd /d "%~dp0"
 title Wuthering Waves Screen Translator
 echo Dang khoi dong ung dung dich...
@@ -43,37 +53,55 @@ pause
     arguments = f'/c ""{bat_path}""'
     icon_location = os.path.join(project_dir, "icon.ico")
     
+    # Escape paths for PowerShell strings
+    shortcut_path_ps = shortcut_path.replace("\\", "\\\\")
+    desktop_shortcut_path_ps = desktop_shortcut_path.replace("\\", "\\\\")
+    target_path_ps = target_path.replace("\\", "\\\\")
+    arguments_ps = arguments.replace("\\", "\\\\")
+    project_dir_ps = project_dir.replace("\\", "\\\\")
+    icon_location_ps = icon_location.replace("\\", "\\\\")
+    
     ps_script = f"""
     $WshShell = New-Object -ComObject WScript.Shell
     
     # Tao shortcut trong thu muc du an
-    $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
-    $Shortcut.TargetPath = "{target_path}"
-    $Shortcut.Arguments = '{arguments}'
-    $Shortcut.WorkingDirectory = "{project_dir}"
-    $Shortcut.IconLocation = "{icon_location}"
+    $Shortcut = $WshShell.CreateShortcut("{shortcut_path_ps}")
+    $Shortcut.TargetPath = "{target_path_ps}"
+    $Shortcut.Arguments = '{arguments_ps}'
+    $Shortcut.WorkingDirectory = "{project_dir_ps}"
+    $Shortcut.IconLocation = "{icon_location_ps}"
     $Shortcut.Description = "Dich man hinh game Wuthering Waves"
     $Shortcut.Save()
     
+    # Set Run as Admin flag (LinkFlags byte 21, bit 6)
+    $bytes = [System.IO.File]::ReadAllBytes("{shortcut_path_ps}")
+    $bytes[21] = $bytes[21] -bor 0x20
+    [System.IO.File]::WriteAllBytes("{shortcut_path_ps}", $bytes)
+    
     # Tao shortcut tren Desktop
-    $DesktopShortcut = $WshShell.CreateShortcut("{desktop_shortcut_path}")
-    $DesktopShortcut.TargetPath = "{target_path}"
-    $DesktopShortcut.Arguments = '{arguments}'
-    $DesktopShortcut.WorkingDirectory = "{project_dir}"
-    $DesktopShortcut.IconLocation = "{icon_location}"
+    $DesktopShortcut = $WshShell.CreateShortcut("{desktop_shortcut_path_ps}")
+    $DesktopShortcut.TargetPath = "{target_path_ps}"
+    $DesktopShortcut.Arguments = '{arguments_ps}'
+    $DesktopShortcut.WorkingDirectory = "{project_dir_ps}"
+    $DesktopShortcut.IconLocation = "{icon_location_ps}"
     $DesktopShortcut.Description = "Dich man hinh game Wuthering Waves"
     $DesktopShortcut.Save()
+    
+    # Set Run as Admin flag for Desktop shortcut
+    $bytes2 = [System.IO.File]::ReadAllBytes("{desktop_shortcut_path_ps}")
+    $bytes2[21] = $bytes2[21] -bor 0x20
+    [System.IO.File]::WriteAllBytes("{desktop_shortcut_path_ps}", $bytes2)
     """
     
     try:
         # Run PowerShell command
         subprocess.run(["powershell", "-Command", ps_script], check=True)
-        print("-> Da tao Shortcut tai thu muc du an!")
-        print("-> Da tao Shortcut ngoai Desktop!")
+        print("-> Da tao Shortcut (tu dong chay Admin) tai thu muc du an!")
+        print("-> Da tao Shortcut (tu dong chay Admin) ngoai Desktop!")
         print("\n=== HOAN THANH SETUP ===")
         print("Bay gio ban co the:")
-        print("1. Click dup vao file Run_Translator.bat de chay.")
-        print("2. Hoac Click chuot phai vao file shortcut 'Wuthering Waves Translator' ngoai Desktop / thu muc du an va chon 'Pin to taskbar' (Ghim vao thanh tac vu) de ghim.")
+        print("1. Click dup vao file Run_Translator.bat hoac file Shortcut bat ky luc nao de chay ung dung duoi quyen Admin.")
+        print("2. Click chuot phai vao file shortcut 'Wuthering Waves Translator' va chon 'Pin to taskbar' de ghim len Taskbar.")
     except Exception as e:
         print(f"Loi tao shortcut qua PowerShell: {e}")
 
